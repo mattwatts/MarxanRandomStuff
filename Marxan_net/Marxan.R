@@ -1,0 +1,318 @@
+# Author: Matt Watts, m.watts@uq.edu.au, July 2013
+# Copyright the University of Queensland 2013
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU AFFERO GENERAL PUBLIC LICENSE Version 3
+# as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU AFFERO GENERAL PUBLIC LICENSE Version 3 for more details.
+#
+# See the license here http://www.gnu.org/licenses/agpl.txt
+#
+# Software purpose: Run Marxan, perform cluster analysis, display output
+# graphs, maps and tables.
+# This file, Marxan.R, contains the R function definitions.
+
+#
+# maps
+#
+
+library(sp)
+library(maptools)
+library(PBSmapping)
+
+DisplaySsolnMap <- function(planningunits,displayzone,fTransparent)
+{
+  # display a summed solution map
+  # displayzone is the zone we are displaying summed solution for
+  blueramp <- colorRampPalette(c("white","blue"))(16) 
+  if (isTRUE(fTransparent))
+  {
+    spplot(planningunits[paste("SSOLN",displayzone,sep="")],col.regions=blueramp,col="transparent")
+  } else {
+    spplot(planningunits[paste("SSOLN",displayzone,sep="")],col.regions=blueramp)
+  }
+}
+
+DisplayMap <- function(planningunits,displayfield,fTransparent)
+{
+  # display map of a single solution
+  # 0, best solution
+  # 1..100, solution X
+  greenramp <- colorRampPalette(c("white","green"))(2)
+  if (displayfield<1)
+  {
+    # 0, best solution
+    if (identical(TRUE,fTransparent))
+    {
+      spplot(planningunits["BESTSOLN"],col.regions= greenramp,col="transparent")
+    } else {
+      spplot(planningunits["BESTSOLN"],col.regions= greenramp)
+    }
+  } else {
+    # 1..100, solution X
+    if (identical(TRUE,fTransparent))
+    {
+      spplot(planningunits[paste("SOLN",displayfield,sep="")],col.regions= greenramp,col="transparent")
+    } else {
+      spplot(planningunits[paste("SOLN",displayfield,sep="")],col.regions= greenramp)
+    }
+  }
+}
+
+DisplaySsolnMapPBSm <- function(pupolygons,putable,displayzone,iNumReps,colour,fTransparent)
+{
+  # display a summed solution map
+  # displayzone is the zone we are displaying summed solution for
+  values <- sqldf(paste("SELECT SSOLN",displayzone," from putable",sep=""))
+  blueramp <- colorRampPalette(c("white",colour))(16)
+  colours <- rep(blueramp[1],nrow(values))
+  for (j in 1:nrow(values))
+  {
+    colours[j] <- blueramp[round(15 / iNumReps * values[j,])+1]
+  }
+  if (isTRUE(fTransparent))
+  {
+    plotPolys(pupolygons,col=colours,axes=FALSE,border=NA,cex.lab=0.1,cex.axis=0.1)
+  } else {
+    plotPolys(pupolygons,col=colours,axes=FALSE,cex.lab=0.1,cex.axis=0.1)    
+  }
+}
+
+DisplayMapPBSm <- function(pupolygons,putable,displayfield,colourpalette,fTransparent)
+{
+  # display map of a single solution
+  # 0, best solution
+  # 1..100, solution X
+  if (displayfield<1)
+  {
+    values <- sqldf("SELECT BESTSOLN from putable")
+  } else {
+    values <- sqldf(paste("SELECT SOLN",displayfield," from putable",sep=""))
+  }
+  colours <- rep(colourpalette[1],nrow(values))
+  for (j in 1:nrow(values))
+  {
+    colours[j] <- colourpalette[values[j,]]
+  }
+  if (isTRUE(fTransparent))
+  {
+    plotPolys(pupolygons,col=colours,axes=FALSE,border=NA,cex.lab=0.1,cex.axis=0.1)
+  } else {
+    plotPolys(pupolygons,col=colours,axes=FALSE,cex.lab=0.1,cex.axis=0.1)    
+  }
+}
+
+#
+# tables
+#
+
+GetOutputFileext <- function(sMarxanDir,sParam)
+# For the specified Marxan output file, return the file extension (.csv or .txt)
+# Scan input.dat for the parameter,
+# if value = 1, .dat, tab delimited, no header
+# if value = 2, .txt, comma delimited (Qmarxan sets this value)
+# if value = 3, .csv, comma delimited
+{
+  inputdat <- readLines(paste(sMarxanDir,"/input.dat",sep=""))
+  iParam <- which(regexpr(sParam,inputdat)==1)
+  
+  iValue <- as.integer(unlist(strsplit(inputdat[iParam], split=" "))[2])
+  
+  if (iValue == 1)
+  {
+    return(".dat")
+  }
+  if (iValue == 2)
+  {
+    return(".txt")
+  }
+  if (iValue == 3)
+  {
+    return(".csv")
+  }
+}
+
+DisplaySumTable <- function(sMarxanDir)
+{
+  sumtable <- read.csv(paste(sMarxanDir,"/output/output_sum",GetOutputFileext(sMarxanDir,"SAVESUMMARY"),sep=""))
+  View(sumtable)
+}
+
+GenerateMVFilename <- function(iRunNumber,sMarxanDir)
+{
+  sFilename <- paste(sMarxanDir,"/output/output_mv",sep="")  
+  iPadding <- 5 - nchar(as.character(iRunNumber))
+  if (iPadding > 0)
+  {
+    for (i in 1:iPadding)
+    {
+      sFilename <- paste(sFilename,"0",sep="")
+    }
+  }
+  sFilename <- paste(sFilename,iRunNumber,GetOutputFileext(sMarxanDir,"SAVETARGMET"),sep="")  
+}
+
+DisplayMVTable <- function(sMarxanDir,displayrun)
+{
+  # where displayrun = 0 means best
+  #                  = 1..100 means run 1..100
+  if (displayrun < 1)
+  {
+    sFilename <- paste(sMarxanDir,"/output/output_mvbest",GetOutputFileext(sMarxanDir,"SAVETARGMET"),sep="")
+  } else {
+    
+    sFilename <- GenerateMVFilename(displayrun,sMarxanDir)
+  }
+  mvtable <- read.csv(sFilename)
+  View(mvtable)
+}
+
+#
+# cluster analysis in Shiny
+#
+
+library(shiny)
+library(vegan)
+library(labdsv)
+
+EucDist <- function(xloc,yloc,adataframe)
+# Computes the euclidean distance from a x,y location to each point in a dataframe of x,y locations.
+# This is used to find the closest solution to a point clicked.
+# Called when user clicks on a 2d cluster graph in a Shiny Server interface.
+# adataframe is the 2d points object computed by nmds()
+{  
+  mindistance <- 1000
+  
+  for (i in 1:dim(adataframe)[1]){
+    
+    x1 <- adataframe[i,][1]
+    y1 <- adataframe[i,][2]
+    distance <- sqrt(((x1 - xloc) ^ 2) + ((y1 - yloc) ^ 2))
+    
+    if (i==1){
+      distances <- c(distance)
+    } else {
+      distances <- c(distances,distance)
+    }
+    
+    if (distance < mindistance){
+      mindistance <- distance
+      closestpoint <- i
+    }
+  }
+  
+  return(closestpoint)
+}
+
+#
+# Import map data from the output ascii files to the planning unit shape file dbf.
+#
+
+GenerateSolnFilename <- function(iRunNumber,sMarxanDir)
+{
+  sFilename <- paste(sMarxanDir,"/output/output_r",sep="")  
+  iPadding <- 5 - nchar(as.character(iRunNumber))
+  if (iPadding > 0)
+  {
+    for (i in 1:iPadding)
+    {
+      sFilename <- paste(sFilename,"0",sep="")
+    }
+  }
+  sFilename <- paste(sFilename,iRunNumber,GetOutputFileext(sMarxanDir,"SAVERUN"),sep="")  
+}
+
+library(foreign)
+library(sqldf)
+
+ImportOutputsCsvToShpDbf <- function(sPuShapeFileDbf, sMarxanDir, iNumberOfRuns, sPUID)
+# Imports the relevant contents of output files to the planning unit shape file dbf.
+{
+  # load and prepare pu_table
+  pu_table <- read.dbf(sPuShapeFileDbf)
+  pu_table <- sqldf(paste("SELECT ", sPUID, " from pu_table",sep=""))
+  colnames(pu_table)[1] <- "PUID"
+                    
+  pu_table$PUID <- as.integer(pu_table$PUID)
+  
+  # load and prepare ssoln_table
+  ssoln_table <- read.csv(paste(sMarxanDir,"/output/output_ssoln",GetOutputFileext(sMarxanDir,"SAVESUMSOLN"),sep=""))
+  colnames(ssoln_table)[1] <- "PUID"
+  colnames(ssoln_table)[2] <- "SSOLN2"
+  ssoln_table$SSOLN1 <- as.integer(iNumberOfRuns - ssoln_table$SSOLN2)
+  ssoln_table$SSOLN2 <- as.integer(ssoln_table$SSOLN2)
+  
+  # join pu_table and ssoln_table
+  pu_table <- sqldf("SELECT * from pu_table LEFT JOIN ssoln_table USING(PUID)")
+  
+  # load and prepare best_table
+  best_table <- read.csv(paste(sMarxanDir,"/output/output_best",GetOutputFileext(sMarxanDir,"SAVEBEST"),sep=""))
+  best_table$BESTSOLN <- as.integer(best_table$SOLUTION + 1)
+  best_table <- sqldf("SELECT PUID, BESTSOLN from best_table")
+  
+  # join pu_table and best_table
+  pu_table <- sqldf("SELECT * from pu_table LEFT JOIN best_table USING(PUID)")
+  
+  for (i in 1:iNumberOfRuns)
+  {
+    sFieldName <- paste("SOLN",i,sep="")
+    
+    # load and prepare solnX_table
+    solnX_table <- read.csv(GenerateSolnFilename(i,sMarxanDir))
+    solnX_table[sFieldName] <- as.integer(solnX_table$SOLUTION + 1)
+    solnX_table <- sqldf(paste("SELECT PUID, ",sFieldName," from solnX_table",sep=""))
+  
+    # join pu_table and solnX_table
+    pu_table <- sqldf("SELECT * from pu_table LEFT JOIN solnX_table USING(PUID)")
+    
+    rm(solnX_table)
+  }
+  
+  # save the new pu_table
+  colnames(pu_table)[1] <- sPUID
+  write.dbf(pu_table,sPuShapeFileDbf)  
+}
+
+#
+# Cluster analysis routines
+#
+
+ClusterUniqueSolutions <- function(sSolutionsMatrix)
+# Returns the set of unique solutions from a solutions matrix.
+# Returns NULL if there is less than 2 unique solutions.
+{
+  solutions_raw<-read.table(sSolutionsMatrix,header=TRUE, row.name=1, sep=",")
+  solutions <- unique(solutions_raw)
+  iUniqueSolutions <- dim(solutions)[1]
+  if (iUniqueSolutions < 2)
+  {
+    return(NULL)
+  } else {
+    return(solutions)
+  }
+}
+
+ClusterPlotNMDS <- function(solutions)
+{
+  soldist <- vegdist(solutions,distance="bray")
+  
+  sol.mds<-nmds(soldist,2)
+  
+  plot(sol.mds$points, type='n', xlab='', ylab='', main='NMDS of solutions')
+  text(sol.mds$points, labels=row.names(solutions))
+}
+
+
+ClusterPlotDendogram <- function(solutions)
+{
+  soldist <- vegdist(solutions,distance="bray")
+  
+  h<-hclust(soldist, method="complete")
+  
+  plot(h, xlab="Solutions", ylab="Disimilarity", main="Bray-Curtis dissimilarity of solutions")
+}
