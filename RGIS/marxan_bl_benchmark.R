@@ -45,7 +45,6 @@ cppFunction(includes='
       }
 
       double distance(double x0, double y0, double x1, double y1) {
-	// return(sqrt(std::abs(Pow<2>(x0-x1)) + std::abs(Pow<2>(y0-y1))));
 	return(sqrt(std::abs(Pow<2>(x0-x1)) + std::abs(Pow<2>(y0-y1))));
       }
       
@@ -56,56 +55,97 @@ cppFunction(includes='
 	  ss << std::setprecision(precision) << number;
 	  return(ss.str());
       }
+      
+      template<typename T>
+      void remove_duplicates(std::vector<T> &v) {
+	v.shrink_to_fit();
+	sort(v.begin(), v.end());
+	v.erase(unique(v.begin(), v.end()), v.end());
+	v.shrink_to_fit();
+      }
             
       class LINE
       {
-	      public:
-		      // declare constructor
-		      LINE(){};
-		      LINE(int pid, int pos0, int pos1, double x0, double y0, double x1, double y1, int tol) 
-			: _pid(pid), _pos0(pos0), _pos1(pos1), _x0(x0), _y0(y0), _x1(x1), _y1(y1), _len(distance(x0,y0,x1,y1))   {
-			  if (_x0 > _x1 || _y0 > _y1) {
-			    _key = num2str<double>(_x0,tol) + "," + num2str<double>(_y0,tol) + ";" +num2str<double>(_x1,tol) + "," + num2str<double>(_y1,tol);
-			  } else {
-			    _key = num2str<double>(_x1,tol) + "," + num2str<double>(_y1,tol) + ";" +num2str<double>(_x0,tol) + "," + num2str<double>(_y0,tol);
-			  }
-		      };
-		      // declare deconstructor
-		      ~LINE(){};
+	public:
+	  // declare constructor
+	  LINE(){};
+	  LINE(int pid, int pos0, int pos1, double x0, double y0, double x1, double y1, int tol) 
+	    : _pid(pid), _pos0(pos0), _pos1(pos1), _x0(x0), _y0(y0), _x1(x1), _y1(y1) {
+	      if (_x0 > _x1 || _y0 > _y1) {
+		_key = num2str<double>(_x0,tol) + "," + num2str<double>(_y0,tol) + ";" +num2str<double>(_x1,tol) + "," + num2str<double>(_y1,tol);
+	      } else {
+		_key = num2str<double>(_x1,tol) + "," + num2str<double>(_y1,tol) + ";" +num2str<double>(_x0,tol) + "," + num2str<double>(_y0,tol);
+	      }
+	  };
+	  // declare deconstructor
+	  ~LINE(){};
 
-		      // declare methods
-		      inline const std::string getLID() const {
-			return(_key + ";" + num2str<int>(_pid) + ";" +num2str<int>(_pos0) + "," + num2str<int>(_pos1));
-		      }
-		      
-		      // declare fields
-		      int _pid;
-		      int _pos0;
-		      int _pos1;
-		      double _x0;
-		      double _y0;
-		      double _x1;
-		      double _y1;
-		      double _len;
-		      std::string _key;
+	  // declare methods
+	  inline const std::string getLID() const {
+	    return(_key + ";" + num2str<int>(_pid) + ";" +num2str<int>(_pos0) + "," + num2str<int>(_pos1));
+	  }
+	  
+	  inline const double getLength() const {
+	    return(distance(_x0,_y0,_x1,_y1));
+	  }
+	  
+	  // declare fields
+	  int _pid;
+	  int _pos0;
+	  int _pos1;
+	  double _x0;
+	  double _y0;
+	  double _x1;
+	  double _y1;
+	  std::string _key;
       };
+      
+      class PUPAIR
+      {
+	public:
+	// declare constructor
+	PUPAIR(){};
+	PUPAIR(int pid0, int pid1, double boundary_length)
+	  : _pid0(pid0), _pid1(pid1), _boundary_length(boundary_length) {
+	    if (_pid0 > _pid1) {
+	      _key = num2str<int>(pid0) + ";" + num2str<int>(pid1);
+	    } else {
+	      _key = num2str<int>(pid1) + ";" + num2str<int>(pid0);
+	    }
+	};
+	
+	// declare deconstructor
+	~PUPAIR(){};
+	
+	// declare methods
+	
+	// declare fields
+	int _pid0;
+	int _pid1;
+	double _boundary_length;
+	std::string _key;
+      };
+      
+      
 ',code='
 	Rcpp::List createBoundaryDF(IntegerVector PID, IntegerVector POS, NumericVector X, NumericVector Y, double tolerance=0.001, double lengthFactor=1.0, double edgeFactor=1.0) {
 		//// initialization
 		/// declare variables and preallocate memory
 		// calculation vars
-		std::unordered_multimap<std::string, LINE> line_UMMAP;
-		std::vector<std::string> key_VSTR;
-		key_VSTR.reserve(PID.size()*10);
 		int tol=(1.0/tol);
+		std::vector<std::string> line_key_VSTR;
+		line_key_VSTR.reserve(PID.size()*10);
+ 		std::unordered_multimap<std::string, LINE> line_UMMAP;
+ 		line_UMMAP.reserve(PID.size()*10);
+		std::vector<std::string> pupair_key_VSTR;
+		pupair_key_VSTR.reserve(PID.size()*10);
+ 		std::unordered_multimap<std::string, PUPAIR> pupair_UMMAP;
+ 		pupair_UMMAP.reserve(PID.size()*10);
 		
 		// export vars
-		std::vector<int> puid0_INT;
-		puid0_INT.reserve(PID.size()*10);
-		std::vector<int> puid1_INT;
-		puid1_INT.reserve(PID.size()*10);
-		std::vector<double> length_DBL;
-		length_DBL.reserve(PID.size()*10);
+		std::vector<int> puid0_VINT;
+		std::vector<int> puid1_VINT;
+		std::vector<double> length_VDBL;
 		std::vector<std::string> warning_VSTR;
 		warning_VSTR.reserve(PID.size()*10);
 		
@@ -117,49 +157,85 @@ cppFunction(includes='
 		  if (PID[i]==PID[currPIdFirstElement]) {
 		    currLine=LINE(PID[i], POS[i], POS[i-1], X[i], Y[i], X[i-1], Y[i-1], tol);
 		    line_UMMAP.insert(std::pair<std::string, LINE>(currLine._key, currLine)); 
-		    key_VSTR.push_back(currLine._key);
+		    line_key_VSTR.push_back(currLine._key);
 		  } else {
 		    currPIdFirstElement=i;
 		  }
 		}
 		
-		// obtain unique keys
-		key_VSTR.shrink_to_fit();
-		sort(key_VSTR.begin(), key_VSTR.end());
-		key_VSTR.erase(unique(key_VSTR.begin(), key_VSTR.end()), key_VSTR.end());
-		key_VSTR.shrink_to_fit();
-				
+		// obtain unique line keys
+		remove_duplicates(line_key_VSTR);
+
 		//// main processing
-		//declare local vars
-		int currPID_INT;
-		auto range=line_UMMAP.equal_range(key_VSTR[0]);
-		auto it=range.first;
-		for (auto i=key_VSTR.cbegin(); i!=key_VSTR.cend(); ++i) {
-		  // init
-		  range=line_UMMAP.equal_range(*i);
-    
-		  // store pu data
-		  it=range.first;
-		  currPID_INT=(it->second)._pid;
-		  puid0_INT.push_back(currPID_INT);
-		  length_DBL.push_back((it->second)._len * lengthFactor);		    
-		  ++it;
-		  if (it == range.second) {
-		    // store same pid if no duplicate lines
-		    puid1_INT.push_back(currPID_INT);
-		  } else {
-		    // std::cout << "here" << std::endl;
-		    // store second pid at least one duplicate lines
-		    puid1_INT.push_back((it->second)._pid);
-		    // check to see if more than 2 spatially identical lines
+		/// construct lines
+		{
+		  // declare local vars
+		  int currPID_INT;
+		  double currLEN_DBL;
+		  PUPAIR currPUPAIR;
+		  auto range=line_UMMAP.equal_range(line_key_VSTR[0]);
+		  auto it=range.first;
+		  
+		  // main loop
+		  for (auto i=line_key_VSTR.cbegin(); i!=line_key_VSTR.cend(); ++i) {
+		    // init
+		    range=line_UMMAP.equal_range(*i);
+		    
+		    // store line data
+		    it=range.first;
+		    currPID_INT=(it->second)._pid;
+		    currLEN_DBL=(it->second).getLength();
 		    ++it;
-		    if (it != range.second) {
-		      it=range.first;
-		      // std::cout << "key = " << it->first << std::endl;
-		      for (; it!=range.second; ++it) {
-			  // std::cout << "key = " << it->first << "/ " << (it->second)._key << "; lid = " << (it->second).getLID() << std::endl;
-			  warning_VSTR.push_back((it->second).getLID());
+		    if (it == range.second) {
+		      // store same pid if no duplicate lines
+		      currPUPAIR=PUPAIR(currPID_INT,currPID_INT,currLEN_DBL);
+		      pupair_key_VSTR.push_back(currPUPAIR._key);
+		      pupair_UMMAP.insert(std::pair<std::string, PUPAIR>(currPUPAIR._key,currPUPAIR));
+		    } else {
+		      // store second pid at least one duplicate lines
+		      currPUPAIR=PUPAIR(currPID_INT,(it->second)._pid,currLEN_DBL);
+		      pupair_key_VSTR.push_back(currPUPAIR._key);
+		      pupair_UMMAP.insert(std::pair<std::string, PUPAIR>(currPUPAIR._key,currPUPAIR));
+		      
+		      // check to see if more than 2 spatially identical lines
+		      ++it;
+		      if (it != range.second) {
+			it=range.first;
+			for (; it!=range.second; ++it) {
+			    warning_VSTR.push_back((it->second).getLID());
+			}
 		      }
+		    }
+		  }
+		}
+		
+		// free memory
+		line_key_VSTR.clear();
+		line_key_VSTR.shrink_to_fit();
+		
+		/// construct pairs
+		{
+		  // obtain unique pair keys
+		  remove_duplicates(pupair_key_VSTR);
+
+		  // allocate memory
+		  puid0_VINT.resize(pupair_key_VSTR.size());
+		  puid1_VINT.resize(pupair_key_VSTR.size());
+		  length_VDBL.resize(pupair_key_VSTR.size());
+		  
+		  // declare local vars
+		  auto range=pupair_UMMAP.equal_range(pupair_key_VSTR[0]);
+		  
+		  // main loop
+		  for (int i=0; i<pupair_key_VSTR.size(); ++i) {
+		    // init
+		    range=pupair_UMMAP.equal_range(pupair_key_VSTR[i]);
+		    
+		    // store pu data
+		    puid0_VINT[i]=(range.first->second)._pid0;
+		    puid1_VINT[i]=(range.first->second)._pid1;
+		    for (auto it=range.first; it!=range.second; ++it) {
+		      length_VDBL[i]+=(it->second)._boundary_length;
 		    }
 		  }
 		}
@@ -167,7 +243,7 @@ cppFunction(includes='
 		//// exports
  		return(
  		  Rcpp::List::create(
-		    Rcpp::Named("bldf") = Rcpp::DataFrame::create(Named("id1")=puid0_INT, Named("id2")=puid1_INT, Named("boundary")=length_DBL),
+		    Rcpp::Named("bldf") = Rcpp::DataFrame::create(Named("id1")=puid0_VINT, Named("id2")=puid1_VINT, Named("boundary")=length_VDBL),
  		    Rcpp::Named("warnings")=warning_VSTR
  		  )
  		);
@@ -183,6 +259,12 @@ cat("generating pu data..\n")
 puLST=lapply(n_pu, makePUs)
 
 #### Main processing
+# # debugging
+# debugPDF=puLST[[1]]
+# debugPDF=debugPDF[which(debugPDF[[1]]<3),]
+# ret=createBoundaryDF(debugPDF[[1]], debugPDF[[3]], debugPDF[[4]], debugPDF[[5]])
+# print(ret)
+
 # run benchmark
 cat("generating benchmarking data..\n")
 bench=microbenchmark(
