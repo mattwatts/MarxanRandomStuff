@@ -1,5 +1,11 @@
 #### Initialization
-# set user params
+options(stringsAsFactors=FALSE, verbose=FALSE)
+
+## set user params
+# debugging
+# n_pu=16
+
+# benchmark
 n_pu=c(16, 100, 1000, 10000)
 n_rep=100
 
@@ -31,17 +37,17 @@ cppFunction(includes='
 
       template<int P>
       inline double Pow(double x) {
-	  return (Pow<P-1>(x) * x);
+	return (Pow<P-1>(x) * x);
       }
 
       template<>
       inline double Pow<1>(double x) {
-	  return (x);
+	return (x);
       }
 
       template<>
       inline double Pow<0>(double x) {
-	  return (1.0);
+	return (1.0);
       }
 
       double distance(double x0, double y0, double x1, double y1) {
@@ -51,9 +57,9 @@ cppFunction(includes='
       template<typename T>
       inline std::string num2str(T number, int precision=10)
       {
-	  std::ostringstream ss;
-	  ss << std::setprecision(precision) << number;
-	  return(ss.str());
+	std::ostringstream ss;
+	ss << std::setprecision(precision) << number;
+	return(ss.str());
       }
       
       template<typename T>
@@ -128,11 +134,13 @@ cppFunction(includes='
       
       
 ',code='
-	Rcpp::List createBoundaryDF(IntegerVector PID, IntegerVector POS, NumericVector X, NumericVector Y, double tolerance=0.001, double lengthFactor=1.0, double edgeFactor=1.0) {
+	Rcpp::List createBoundaryDF(std::vector<int> PID, std::vector<double> X, std::vector<double> Y, double tolerance=0.001, double lengthFactor=1.0, double edgeFactor=1.0) {
 		//// initialization
 		/// declare variables and preallocate memory
 		// calculation vars
 		int tol=(1.0/tol);
+		std::vector<int> pos_VINT(PID.size());
+		std::iota(pos_VINT.begin(), pos_VINT.end(), 1);
 		std::vector<std::string> line_key_VSTR;
 		line_key_VSTR.reserve(PID.size()*10);
  		std::unordered_multimap<std::string, LINE> line_UMMAP;
@@ -155,13 +163,23 @@ cppFunction(includes='
 		LINE currLine;
 		for (int i=1; i!=PID.size(); ++i) {
 		  if (PID[i]==PID[currPIdFirstElement]) {
-		    currLine=LINE(PID[i], POS[i], POS[i-1], X[i], Y[i], X[i-1], Y[i-1], tol);
+		    currLine=LINE(PID[i], pos_VINT[i], pos_VINT[i-1], X[i], Y[i], X[i-1], Y[i-1], tol);
 		    line_UMMAP.insert(std::pair<std::string, LINE>(currLine._key, currLine)); 
 		    line_key_VSTR.push_back(currLine._key);
 		  } else {
 		    currPIdFirstElement=i;
 		  }
 		}
+		
+		// free memory
+		PID.clear();
+		PID.shrink_to_fit();
+		X.clear();
+		X.shrink_to_fit();
+		Y.clear();
+		Y.shrink_to_fit();
+		pos_VINT.clear();
+		pos_VINT.shrink_to_fit();
 		
 		// obtain unique line keys
 		remove_duplicates(line_key_VSTR);
@@ -173,8 +191,8 @@ cppFunction(includes='
 		  int currPID_INT;
 		  double currLEN_DBL;
 		  PUPAIR currPUPAIR;
-		  auto range=line_UMMAP.equal_range(line_key_VSTR[0]);
-		  auto it=range.first;
+		  std::unordered_multimap<std::string,LINE>::iterator it;
+ 		  std::pair<std::unordered_multimap<std::string,LINE>::iterator,std::unordered_multimap<std::string,LINE>::iterator> range;
 		  
 		  // main loop
 		  for (auto i=line_key_VSTR.cbegin(); i!=line_key_VSTR.cend(); ++i) {
@@ -224,7 +242,7 @@ cppFunction(includes='
 		  length_VDBL.resize(pupair_key_VSTR.size());
 		  
 		  // declare local vars
-		  auto range=pupair_UMMAP.equal_range(pupair_key_VSTR[0]);
+ 		  std::pair<std::unordered_multimap<std::string,PUPAIR>::iterator,std::unordered_multimap<std::string,PUPAIR>::iterator> range;
 		  
 		  // main loop
 		  for (int i=0; i<pupair_key_VSTR.size(); ++i) {
@@ -236,6 +254,12 @@ cppFunction(includes='
 		    puid1_VINT[i]=(range.first->second)._pid1;
 		    for (auto it=range.first; it!=range.second; ++it) {
 		      length_VDBL[i]+=(it->second)._boundary_length;
+		    }
+		    
+		    // apply boundary length factors
+		    length_VDBL[i]*=lengthFactor;
+		    if (puid0_VINT[i]==puid1_VINT[i]) {
+		      length_VDBL[i]*=edgeFactor;
 		    }
 		  }
 		}
@@ -262,16 +286,16 @@ puLST=lapply(n_pu, makePUs)
 # # debugging
 # debugPDF=puLST[[1]]
 # debugPDF=debugPDF[which(debugPDF[[1]]<3),]
-# ret=createBoundaryDF(debugPDF[[1]], debugPDF[[3]], debugPDF[[4]], debugPDF[[5]])
+# ret=createBoundaryDF(debugPDF[[1]], debugPDF[[4]], debugPDF[[5]])
 # print(ret)
 
 # run benchmark
 cat("generating benchmarking data..\n")
 bench=microbenchmark(
-  "n = 16" = createBoundaryDF(puLST[[1]][[1]], puLST[[1]][[2]], puLST[[1]][[3]], puLST[[1]][[4]]),
-  "n = 100" = createBoundaryDF(puLST[[2]][[1]], puLST[[2]][[2]], puLST[[2]][[3]], puLST[[2]][[4]]),
-  "n = 1000" = createBoundaryDF(puLST[[3]][[1]], puLST[[3]][[2]], puLST[[3]][[3]], puLST[[3]][[4]]),
-  "n = 10000" = createBoundaryDF(puLST[[4]][[1]], puLST[[4]][[2]], puLST[[4]][[3]], puLST[[4]][[4]]),
+  "n = 16" = createBoundaryDF(puLST[[1]][[1]], puLST[[1]][[4]], puLST[[1]][[5]]),
+  "n = 100" = createBoundaryDF(puLST[[2]][[1]], puLST[[2]][[4]], puLST[[2]][[5]]),
+  "n = 1000" = createBoundaryDF(puLST[[3]][[1]], puLST[[3]][[4]], puLST[[3]][[5]]),
+  "n = 10000" = createBoundaryDF(puLST[[4]][[1]], puLST[[4]][[4]], puLST[[4]][[5]]),
   times=n_rep, unit="s"
 )
 bench2=microbenchmark:::convert_to_unit(bench, "s")
