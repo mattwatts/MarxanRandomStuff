@@ -90,69 +90,112 @@ cppFunction(code='
 ', plugins=c("cpp11"),verbose=FALSE
 )
 
-puRasterize=function(polys, rast, field=NULL) {
+is.gdalInstalled=function() {
+	gdal_setInstallation()
+	return(!is.null(getOption("gdalUtils_gdalPath")))
+}
+
+rasterize.gdal=function(polys, rast, field=NULL) {
+	writeOGR(polys, tempdir(), 'polys', driver='ESRI Shapefile', overwrite=TRUE)
+	writeRaster(setValues(rast, NA), file.path(tempdir(), 'rast.tif'), NAflag=-9999, overwrite=TRUE)
+	return(gdal_rasterize(file.path(tempdir(), 'polys.shp'), file.path(tempdir(), 'rast.tif'), l="polys", a="id", output_Raster=TRUE)[[1]])
+}
+
+.zonalSum.RasterLayerInMemory=function(polys, rast, featureName) {
+	tmp=rcpp_groupsum(getValues(polys),getValues(rast))
+	return(data.frame(species=featureName, pu=attr(tmp, "ids"), amount=c(tmp)))
+}
+
+.zonalSum.RasterLayerNotInMemory=function(bs, polys, rast, featureName, ncores, registered) {
+	if (registered & .Platform$OS.type=="windows")
+		clusterExport(clust, c("bs","polys", "rast", "rcpp_groupsum"))
+	tmp=rcpp_groupcombine(llply(seq_len(bs$n), .parallel=registered, function(i) {
+		return(rcpp_groupsum(getValues(polys, bs$row[i], bs$nrows[i]), getValues(rast, bs$row[i], bs$nrows[i])))
+	}))
+	return(data.frame(species=featureName, pu=attr(tmp, "ids"), amount=c(tmp)))
+}
+
+zonalSum.RasterLayer=function(polys, rast, featureName="Layer.1", ncores=1) {
+	if (canProcessInMemory(polys,2)) {
+		return(.zonalSum.RasterLayerInMemory(polys, rast, featureName))
+	} else {
+		bs=blockSize(polys)
+		if(ncores>1) {
+			if (.Platform$OS.type=="windows") {
+				library(doSNOW)
+				clust=makeCluster(ncores, type="SOCK")
+				clusterEvalQ(clust, {library(raster);library(Rcpp)})
+				registerDoSNOW(clust)
+			} else {
+				library(doMC)
+				registerDoMC(cores=ncores)
+			}
+		}
+		return(.zonalSum.RasterLayerNotInMemory(bs, rast, featureName, ncores, ncores>1))
+	}
+}
+
+zonalSum.RasterStack=function(polys, raststk, featureNames=names(raststk), ncores=1) {
+	if (canProcessInMemory(polys,2)) {
+		return(rbind.fill(llply(seq_len(nlayers(raststk)), function(l) {
+				return(.zonalSum.RasterLayerInMemory(polys, raststk[[l]], featureNames[l]))
+		})))
+	} else {
+		bs=blockSize(polys)	
+		if (ncores>1) {
+			if (.Platform$OS.type=="windows") {
+				library(doSNOW)
+				clust=makeCluster(ncores, type="SOCK")
+				clusterEvalQ(clust, {library(raster);library(Rcpp)})
+				clusterExport(clust, c("bs", "polys", "rcpp_groupsum"))
+				registerDoSNOW(clust)
+			} else {
+				library(doMC)
+				registerDoMC(cores=ncores)
+			}
+		}
+		# main processing
+		return(rbind.fill(llply(seq_len(nlayers(raststk)), function(l) {
+			return(.zonalSum.RasterLayerNotInMemory(bs, polys, raststk[[l]], featureNames[l], registered=ncores>1))
+		})))
+	}
+}
+
+createFeatureDataFrame=function(polys, rast, featureNames=names(rast), field=NULL, ncores=1) {
+	# check for invalid inputs
+	stopifnot(inherits(polys, "SpatialPolygons"))
+	stopifnot(inherits(rast, c("RasterLayer", "RasterStack", "RasterBrick")))
+	if(inherits(rast, "RasterLayer") & length(featureNames)>1)
+		warning("rast is a RasterLayer and multiple featureNames provided, so only first name will be used.")
+	if (inherits(rast, c("RasterLayer", "RasterStack"))) {
+		if (length(featureNames)!=nlayers(rast)) {
+			warning("The number of layers in rast and the length of featureNames is different, so featureNames will be set as names(rast).")
+			featureNames=names(rast)
+		}
+	}
+
 	# prepare attribute table
 	if (is.null(field)) {
 		polys@data=data.frame(id=seq_len(nrow(polys@data)), row.names=row.names(polys@data))
 	} else {
 		polys@data=data.frame(id=polys@data[[field]], row.names=row.names(polys@data))
 	}
-	# main processing
-	if (canProcessInMemory(rast,2)) {	
-		# do processing in R via the raster package
-		return(rasterize(polys, rast))
-	} else {
-		# do processing in gdal
-		writeOGR(polys, tempdir(), 'polys', driver='ESRI Shapefile', overwrite=TRUE)
-		writeRaster(setValues(rast, NA), file.path(tempdir(), 'rast.tif'), NAflag=-9999, overwrite=TRUE)
-		return(gdal_rasterize(file.path(tempdir(), 'polys.shp'), file.path(tempdir(), 'rast.tif'), l="polys", a="id", output_Raster=TRUE)[[1]])
-	}
-}
-
-puExtract=function(polys, rast, field=NULL, ncores=1, progressbar="none") {
-	if (canProcessInMemory(polys,2)) {	
-		return(rcpp_groupsum(getValues(polys), getValues(rast)))
-	} else {
-		# preprocessing
-		out=rasterTmpFile()
-		bs=blockSize(polys)
-		# set up parallel processing
-		if(ncores>1) {
-			if (.Platform$OS.type=="windows") {
-				library(doSNOW)
-				registerDoSNOW(makeCluster(ncores, type="SOCK"))
-			} else {
-				library(doMC)
-				registerDoMC(cores=ncores)
-			}
-		}
-		# main processing 
-		return(rcpp_groupcombine(llply(seq_len(bs$n), .parallel=ncores>1, .progress=progressbar, .parallel=ncores>1, function(i) {
-			return(rcpp_groupsum(getValues(polys, bs$row[i], bs$nrows[i]), getValues(rast, bs$row[i], bs$nrows[i])))
-		})))
-	}
-}
-
-createFeatureDataFrame=function(polys, rast, field=NULL, ncores=1, progressbar="none") {
-	# check data types
-	stopifnot(inherits(polys, "SpatialPolygons"))
+	
 	# generate raster layer with polygons
-	if (inherits(rast, "RasterLayer")) {
-		polys=puRasterize(polys, rast, field)
-	} else if (inherits(rast, c("RasterBrick", "RasterStack"))) {
-		polys=puRasterize(polys, rast[[1]], field)
+	temprast=rast
+	if (inherits(rast, c("RasterBrick", "RasterStack")))
+		temprast=rast[[1]]
+	if (!canProcessInMemory(rast,2) & is.gdalInstalled()) {
+		polys=rasterize.gdal(polys, temprast, field)
 	} else {
-		stop("rast should be of class: RasterLayer, RasterStack, RasterBrick")
+		polys=rasterize(polys, temprast, method="ngb")
 	}
-	# main processing	
+	
+	# main processing
 	if (inherits(rast, "RasterLayer")) {
-		return(data.frame(layer.1=puExtract(polys, rast, field, ncores, progressbar)))
-	} else if (inherits(rast,c("RasterStack", "RasterBrick"))) {
-		retLST=list()
-		for (i in seq_len(nlayers(rast))) {
-			retLST[[names(rast)[i]]]=puExtract(polys, rast, field, ncores, progressbar)
-		}
-		return(do.call(cbind.data.frame, retLST))
+		return(zonalSum.RasterLayer(polys, rast, featureNames, ncores))
+	} else {
+		return(zonalSum.RasterStack(polys, rast, featureNames, ncores))
 	}
 }
 
