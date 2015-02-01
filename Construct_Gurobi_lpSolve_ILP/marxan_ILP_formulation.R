@@ -52,7 +52,7 @@ puxorpu.vars=paste0('pu',boundDF$id1[notedge],'_pu',boundDF$id2[notedge])
 # ini
 # cplex format http://lpsolve.sourceforge.net/5.5/CPLEX-format.htm
 # common logical operations http://rutcor.rutgers.edu/~dpapp/om-07fall/logical_constraints.pdf
-sink('C:/Users/jeff/Documents/GitHub/MarxanRandomStuff/Construct_Gurobi_lpSolve_ILP/marxan_model.lp', type='output')
+sink(file.path(tempdir(), 'marxan.lp'), type='output')
 cat('/* marxan model */\n\n')
 cat('/* objective function */\n')
 ## objective function
@@ -123,7 +123,7 @@ cat('\nbin ',
 sink(file=NULL)
 
 # solve problem
-lpmod=read.lp('C:/Users/jeff/Documents/GitHub/MarxanRandomStuff/Construct_Gurobi_lpSolve_ILP/marxan_model.lp', verbose='full')
+lpmod=read.lp(file.path(tempdir(), 'marxan.lp'), verbose='full')
 solve(lpmod)
 pus=get.variables(lpmod)[seq_len(n_pu)]
 ta=get.variables(lpmod)[n_pu+seq_len(n_spp)]
@@ -135,9 +135,10 @@ for (i in seq_len(n_spp)) {
 	puamounts=tapply(puvspeciesDF$amount[which(puvspeciesDF$species==i)], puvspeciesDF$pu[which(puvspeciesDF$species==i)])
 	puPOLYS@data[[paste0('spp',i)]]=replace(rep(0, n_pu), puvspeciesDF$pu[which(puvspeciesDF$species==i)], puamounts)
 }
+
 try(dev.off(), silent=TRUE)
 try(dev.off(), silent=TRUE)
-spplot(puPOLYS, c('status'))
+spplot(puPOLYS, c('status'), main='solution')
 x11()
 spplot(puPOLYS, c('spp1','spp2'))
 
