@@ -37,7 +37,7 @@ boundDF=calcBoundaryData(puPOLYS)
 puvspeciesDF=calcPuVsSpeciesData(puPOLYS, sppSTK)
 
 #### Main processing
-## sink model to cplex file format
+## sink model to lp file format
 
 ### variable nomenclature
 # sfX = binary variable to indicate if target not met for species X
@@ -50,7 +50,7 @@ edge=which(boundDF$id1==boundDF$id2)
 puxorpu.vars=paste0('pu',boundDF$id1[notedge],'_pu',boundDF$id2[notedge])
 
 # ini
-# cplex format http://lpsolve.sourceforge.net/5.5/CPLEX-format.htm
+# lp format http://lpsolve.sourceforge.net/5.5/lp-format.htm
 # common logical operations http://rutcor.rutgers.edu/~dpapp/om-07fall/logical_constraints.pdf
 sink(file.path(tempdir(), 'marxan.lp'), type='output')
 cat('/* marxan model */\n\n')
